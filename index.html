@@ -232,6 +232,18 @@
     const EXIT_ANIMATION_DURATION = 500; 
     const LOSER_SHRINK_DURATION = 400;
     const LIFT_SHRINK_DURATION = 220; // 手指鬆開縮小消失的動畫時長 (ms)
+    const SPOTLIGHT_EXIT_DURATION = 420; // 聚光燈放大退出動畫時長 (ms)
+
+    // Spotlight State (僅限單人中獎模式)
+    let spotlightState = {
+        active: false,
+        x: 0,
+        y: 0,
+        color: '#FF00FF',
+        radius: 38,
+        isExiting: false,
+        exitStartTime: 0
+    };
 
     const fingers = new Map();
     
@@ -526,11 +538,9 @@
         
         updateGameLogic();
 
-        if (gameState === 'RESULT' && mode === 'pick') {
-            const winners = Array.from(fingers.values()).filter(f => f.isWinner && !f.isDead);
-            if (winners.length === 1) {
-                drawSpotlight(winners[0]);
-            }
+        // 僅在單人中獎 (targetValue === 1) 時繪製聚光燈
+        if (gameState === 'RESULT' && mode === 'pick' && targetValue === 1) {
+            drawSpotlight();
         }
 
         fingers.forEach(f => f.draw(ctx));
@@ -539,31 +549,48 @@
     }
     loop();
 
-    function drawSpotlight(winner) {
-        const targetRadius = winner.radius + 60;
+    function drawSpotlight() {
+        if (!spotlightState.active) return;
+        // 多人中獎時絕不繪製聚光燈
+        if (mode !== 'pick' || targetValue !== 1) return;
+
+        const targetRadius = spotlightState.radius + 60;
         const maxDimension = Math.max(width, height) * 1.5;
         let currentRadius;
+        let currentAlpha = 0.85;
 
-        if (isGameExiting) {
-            const elapsed = Date.now() - exitStartTime;
-            let progress = Math.min(elapsed / EXIT_ANIMATION_DURATION, 1);
-            const eased = easeInCubic(progress); 
+        if (spotlightState.isExiting) {
+            const elapsed = Date.now() - spotlightState.exitStartTime;
+            const progress = Math.min(elapsed / SPOTLIGHT_EXIT_DURATION, 1);
+            const eased = easeOutCubic(progress);
+            // 放大退出動畫：聚光燈圓孔從 targetRadius 急速放大到超出螢幕 maxDimension
             currentRadius = targetRadius + (maxDimension - targetRadius) * eased;
+            // 背景遮罩同步淡出 (0.85 -> 0)
+            currentAlpha = 0.85 * (1 - easeInCubic(progress));
+
+            if (progress >= 1) {
+                spotlightState.active = false;
+                return;
+            }
         } else {
+            // 入場動畫：從外圍聚攏到 targetRadius
             const elapsed = Date.now() - resultStartTime;
-            let progress = Math.min(elapsed / 600, 1);
+            const progress = Math.min(elapsed / 600, 1);
             const eased = easeOutCubic(progress); 
             currentRadius = maxDimension - (maxDimension - targetRadius) * eased;
+            currentAlpha = 0.85 * Math.min(progress * 1.5, 1);
         }
+
+        if (currentAlpha <= 0.005) return;
 
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, width, height);
         if (currentRadius < 0) currentRadius = 0;
         
-        ctx.arc(winner.x, winner.y, currentRadius, 0, Math.PI * 2, true);
-        ctx.fillStyle = winner.originalColor;
-        ctx.globalAlpha = 0.85; 
+        ctx.arc(spotlightState.x, spotlightState.y, currentRadius, 0, Math.PI * 2, true);
+        ctx.fillStyle = spotlightState.color;
+        ctx.globalAlpha = currentAlpha;
         
         ctx.fill();
         ctx.restore();
@@ -629,7 +656,22 @@
                     f.isLoser = true;
                 }
             });
+
+            // 僅在單人中獎 (targetValue === 1) 時啟動聚光燈
+            if (targetValue === 1 && winners.length === 1) {
+                spotlightState.active = true;
+                spotlightState.x = winners[0].x;
+                spotlightState.y = winners[0].y;
+                spotlightState.color = winners[0].originalColor;
+                spotlightState.radius = winners[0].targetRadius || 38;
+                spotlightState.isExiting = false;
+                spotlightState.exitStartTime = 0;
+            } else {
+                // 多人中獎時，絕不開啟聚光燈
+                spotlightState.active = false;
+            }
         } else if (mode === 'group') {
+            spotlightState.active = false;
             const shuffled = shuffle(fingerArray);
             const groupColors = [];
             for(let i=0; i<targetValue; i++) {
@@ -667,7 +709,14 @@
                 if (f && !f.isLifted) {
                     if (gameState === 'RESULT') {
                         if (mode === 'pick') {
-                             if (f.isWinner) { f.x = t.pageX; f.y = t.pageY; }
+                             if (f.isWinner) {
+                                 f.x = t.pageX;
+                                 f.y = t.pageY;
+                                 if (targetValue === 1 && spotlightState.active && !spotlightState.isExiting) {
+                                     spotlightState.x = t.pageX;
+                                     spotlightState.y = t.pageY;
+                                 }
+                             }
                         } else if (mode === 'group') {
                              f.x = t.pageX; f.y = t.pageY;
                         }
@@ -713,9 +762,19 @@
 
         if (shouldReset) {
             if (!resetTimer) {
-                resetTimer = setTimeout(() => {
-                    startExitSequence();
-                }, 1000); 
+                // 單人中獎且聚光燈有效時：立即啟動聚光燈放大退出動畫
+                if (mode === 'pick' && targetValue === 1 && spotlightState.active) {
+                    spotlightState.isExiting = true;
+                    spotlightState.exitStartTime = Date.now();
+                    resetTimer = setTimeout(() => {
+                        resetGame();
+                    }, SPOTLIGHT_EXIT_DURATION);
+                } else {
+                    // 多人中獎或分組模式：無聚光燈，正常延遲退出
+                    resetTimer = setTimeout(() => {
+                        startExitSequence();
+                    }, 800); 
+                }
             }
         }
     }
@@ -732,6 +791,8 @@
         globalProgress = 0;
         resetTimer = null;
         isGameExiting = false;
+        spotlightState.active = false;
+        spotlightState.isExiting = false;
         uiLayer.classList.remove('hidden-ui');
     }
 
@@ -752,7 +813,14 @@
         if (!f) return;
         
         if (gameState === 'RESULT') {
-             if (mode === 'pick' && f.isWinner) { f.x = e.pageX; f.y = e.pageY; }
+             if (mode === 'pick' && f.isWinner) {
+                 f.x = e.pageX;
+                 f.y = e.pageY;
+                 if (targetValue === 1 && spotlightState.active && !spotlightState.isExiting) {
+                     spotlightState.x = e.pageX;
+                     spotlightState.y = e.pageY;
+                 }
+             }
              if (mode === 'group') { f.x = e.pageX; f.y = e.pageY; }
         } else {
             if (isMouseDown) { f.x = e.pageX; f.y = e.pageY; }
