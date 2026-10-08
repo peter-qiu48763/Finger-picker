@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1C24"/>
+      <stop offset="100%" stop-color="#101116"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Base App Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad2)"/>
+
+  <!-- Center Grouping / Wheel Rays (Flat 3-Team Arcs) -->
+  <g transform="translate(256, 256)">
+    <!-- Arc 1: Cyan Team -->
+    <path d="M -130 -60 A 145 145 0 0 1 0 -145" fill="none" stroke="#00E5FF" stroke-width="26" stroke-linecap="round"/>
+    <!-- Arc 2: Coral / Red Team -->
+    <path d="M 60 -130 A 145 145 0 0 1 145 0" fill="none" stroke="#FF3366" stroke-width="26" stroke-linecap="round"/>
+    <!-- Arc 3: Lime Green Team -->
+    <path d="M 125 75 A 145 145 0 0 1 -35 140" fill="none" stroke="#39FF14" stroke-width="26" stroke-linecap="round"/>
+    <!-- Arc 4: Yellow Team -->
+    <path d="M -85 115 A 145 145 0 0 1 -145 -10" fill="none" stroke="#FFCC00" stroke-width="26" stroke-linecap="round"/>
+
+    <!-- Concentric Target Orbit Ring -->
+    <circle cx="0" cy="0" r="95" fill="none" stroke="#2B2F42" stroke-width="6"/>
+
+    <!-- Center Chosen Touch Point (Target Reticle) -->
+    <!-- Outer Countdown Ring Segment -->
+    <circle cx="0" cy="0" r="62" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-dasharray="190 80" stroke-linecap="round"/>
+    <!-- Main Center Touch Circle -->
+    <circle cx="0" cy="0" r="44" fill="#FFFFFF"/>
+    <!-- Core Accent Dot -->
+    <circle cx="0" cy="0" r="18" fill="#151720"/>
+    <circle cx="0" cy="0" r="8" fill="#00E5FF"/>
+  </g>
+</svg>

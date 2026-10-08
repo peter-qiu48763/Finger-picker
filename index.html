@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <link rel="manifest" href="manifest.json">
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("sw.js").then(registration => {
+            registration.update();
+          });
+        });
+      }
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Finger Picker</title>
+
+    <!-- Google Fonts: LINE Seed JP -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* --- CSS Reset & Base --- */
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            font-family: 'LINE Seed JP', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* --- Layers --- */
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        #ui-layer {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            width: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            /* 修改：增加 transform 的過渡效果，使用 cubic-bezier 讓動態更滑順 */
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
+            /* 預設位置 */
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        /* --- UI Components --- */
+        .control-panel {
+            background: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 12px 24px;
+            border-radius: 50px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            pointer-events: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+        }
+
+        .mode-switch-container {
+            display: flex;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 999px;
+            padding: 4px;
+        }
+
+        .mode-btn {
+            color: #888;
+            font-weight: 600;
+            font-size: 15px;
+            padding: 8px 18px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .mode-btn.active {
+            background-color: #333;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        .counter-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: white;
+            font-weight: bold;
+            background: #222;
+            padding: 4px 6px;
+            padding-right: 12px;
+            border-radius: 24px;
+        }
+
+        .counter-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #444;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+            font-size: 18px;
+            transition: background 0.1s;
+        }
+
+        .counter-btn:active {
+            background: #666;
+            transform: scale(0.95);
+        }
+
+        .counter-text {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
+
+        .counter-num {
+            font-size: 18px;
+        }
+
+        .counter-unit {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .instructions {
+            color: #666;
+            font-size: 13px;
+            margin-top: 12px;
+            letter-spacing: 0.5px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        }
+
+        /* 將 UI 移出螢幕下方 (位移 200px 或是 150%) */
+        /* 同時降低透明度以達成更自然的退出效果 */
+        .hidden-ui {
+            transform: translateY(200%) !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="ui-layer">
+        <div class="control-panel">
+            <!-- Mode Switch -->
+            <div class="mode-switch-container">
+                <div id="mode-pick" class="mode-btn active" onclick="setMode('pick')">抽籤</div>
+                <div id="mode-group" class="mode-btn" onclick="setMode('group')">分組</div>
+            </div>
+
+            <!-- Quantity Control -->
+            <div class="counter-control">
+                <div class="counter-btn" onclick="adjustCount(-1)">-</div>
+                <div class="counter-text">
+                    <span id="target-count" class="counter-num">1</span>
+                    <span id="target-label" class="counter-unit">人</span>
+                </div>
+                <div class="counter-btn" onclick="adjustCount(1)">+</div>
+            </div>
+        </div>
+        <div class="instructions">兩指以上開始</div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const uiLayer = document.getElementById('ui-layer');
+
+    let width, height;
+    
+    // Settings
+    let mode = 'pick'; 
+    let targetValue = 1; 
+
+    // Game Logic
+    let gameState = 'WAITING'; // WAITING, COUNTDOWN, RESULT
+    
+    // Timers & Duration Constants
+    const LOCK_TIME = 825;
+    const TOTAL_COUNTDOWN_TIME = 1850; 
+    
+    let globalCountdownStart = 0;
+    let globalProgress = 0; 
+
+    // Result Animation & Timers
+    let resultStartTime = 0;
+    let resetTimer = null; 
+    
+    // Exit Animation State
+    let isGameExiting = false;
+    let exitStartTime = 0;
+    const EXIT_ANIMATION_DURATION = 500; 
+    const LOSER_SHRINK_DURATION = 400;
+    const LIFT_SHRINK_DURATION = 220; // 手指鬆開縮小消失的動畫時長 (ms)
+
+    const fingers = new Map();
+    
+    // 10 Distinct Neon Colors
+    const PRESET_COLORS = [
+        '#FF00FF', // Magenta
+        '#00FFFF', // Cyan
+        '#39FF14', // Neon Green
+        '#FFFF00', // Yellow
+        '#FF3131', // Neon Red
+        '#9D00FF', // Electric Purple
+        '#0066FF', // Bright Blue
+        '#FF8800', // Neon Orange
+        '#00FF99', // Turquoise
+        '#FE019A'  // Hot Pink
+    ];
+
+    // Helper: Linear Interpolation for Colors
+    function lerpColor(a, b, amount) { 
+        const ah = parseInt(a.replace(/#/g, ''), 16),
+              ar = ah >> 16, ag = ah >> 8 & 0xff, ab = ah & 0xff,
+              bh = parseInt(b.replace(/#/g, ''), 16),
+              br = bh >> 16, bg = bh >> 8 & 0xff, bb = bh & 0xff,
+              rr = ar + amount * (br - ar),
+              rg = ag + amount * (bg - ag),
+              rb = ab + amount * (bb - ab);
+        return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
+    }
+
+    // Helper: Hex to RGBA (for transparency)
+    function hexToRgba(hex, alpha) {
+        // Handle short hex #FFF
+        if (hex.length === 4) {
+            hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+        }
+        let r = parseInt(hex.slice(1, 3), 16);
+        let g = parseInt(hex.slice(3, 5), 16);
+        let b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // Helper: Convert HSL to Hex
+    function hslToHex(h, s, l) {
+        l /= 100;
+        const a = s * Math.min(l, 1 - l) / 100;
+        const f = n => {
+            const k = (n + h / 30) % 12;
+            const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+            return Math.round(255 * color).toString(16).padStart(2, '0');
+        };
+        return `#${f(0)}${f(8)}${f(4)}`;
+    }
+
+    // Helper: Easing functions
+    function easeOutCubic(t) { return (--t)*t*t+1; } 
+    function easeInCubic(t) { return t*t*t; }         
+
+    // Helper: Fisher-Yates (Knuth) 洗牌演算法（消除隨機偏差）
+    function shuffle(array) {
+        const copy = [...array];
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    }
+
+    class Finger {
+        constructor(id, x, y) {
+            this.id = id;
+            this.x = x;
+            this.y = y;
+            this.originalColor = this.assignUniqueColor();
+            this.currentColor = this.originalColor;
+            
+            this.radius = 0;
+            this.targetRadius = 38;
+            
+            this.startTime = Date.now();
+            this.isReady = false; 
+            this.lockInProgress = 0; 
+            
+            this.isWinner = false;
+            this.targetGroupColor = null;
+            this.groupIndex = -1;
+            this.isLoser = false;
+            
+            this.isLifted = false;
+            this.isLifting = false;
+            this.liftStartTime = 0;
+            this.liftStartRadius = 0;
+            this.isDead = false;
+        }
+
+        startLift() {
+            if (this.isLifting || this.isDead) return;
+            this.isLifted = true;
+            this.isLifting = true;
+            this.liftStartTime = Date.now();
+            this.liftStartRadius = Math.max(this.radius, 10);
+        }
+
+        assignUniqueColor() {
+            const usedColors = Array.from(fingers.values()).map(f => f.originalColor);
+            const available = PRESET_COLORS.filter(c => !usedColors.includes(c));
+            if (available.length > 0) {
+                return available[Math.floor(Math.random() * available.length)];
+            } else {
+                return PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)];
+            }
+        }
+
+        update() {
+            if (this.isLifting) {
+                const elapsed = Date.now() - this.liftStartTime;
+                const progress = Math.min(elapsed / LIFT_SHRINK_DURATION, 1);
+                this.radius = this.liftStartRadius * (1 - easeInCubic(progress));
+                if (progress >= 1 || this.radius <= 0.5) {
+                    this.radius = 0;
+                    this.isDead = true;
+                }
+                return;
+            }
+
+            if (this.radius < this.targetRadius) {
+                this.radius += (this.targetRadius - this.radius) * 0.2;
+            }
+
+            if (gameState === 'WAITING' || gameState === 'COUNTDOWN') {
+                const now = Date.now();
+                const elapsed = now - this.startTime;
+                this.lockInProgress = Math.min(elapsed / LOCK_TIME, 1);
+
+                if (this.lockInProgress >= 1 && !this.isReady) {
+                    this.isReady = true;
+                    if (navigator.vibrate) navigator.vibrate(20);
+                }
+            }
+            
+            if (gameState === 'RESULT' && mode === 'group' && this.targetGroupColor) {
+                const resultElapsed = Date.now() - resultStartTime;
+                const transitionProgress = Math.min(resultElapsed / 500, 1);
+                this.currentColor = lerpColor('#FFFFFF', this.targetGroupColor, transitionProgress);
+            } else if (mode === 'group') {
+                this.currentColor = '#FFFFFF';
+            } else {
+                this.currentColor = this.originalColor;
+            }
+        }
+
+        draw(ctx) {
+            let currentRadius = this.radius;
+
+            // 常駐呼吸效果（鬆開縮小時停用）
+            if (this.radius > 5 && !this.isLifting) {
+                const pulse = Math.sin(Date.now() / 250) * 2.5; 
+                currentRadius += pulse;
+            }
+
+            // 1. 處理抽籤模式落選者的消失動畫
+            if (gameState === 'RESULT' && mode === 'pick' && !this.isWinner) {
+                const elapsed = Date.now() - resultStartTime;
+                if (elapsed >= LOSER_SHRINK_DURATION) {
+                    return; 
+                } else {
+                    const progress = elapsed / LOSER_SHRINK_DURATION;
+                    const scale = 1 - easeInCubic(progress);
+                    currentRadius *= scale;
+                }
+            }
+
+            // 2. 處理全域退出動畫
+            if (isGameExiting) {
+                const elapsed = Date.now() - exitStartTime;
+                const progress = Math.min(elapsed / EXIT_ANIMATION_DURATION, 1);
+                const scale = 1 - easeInCubic(progress); 
+                currentRadius *= scale;
+            }
+
+            if (currentRadius <= 0.5) return;
+
+            ctx.save();
+
+            // 若正在鬆開縮小，同步平滑淡出
+            if (this.isLifting) {
+                const elapsed = Date.now() - this.liftStartTime;
+                const progress = Math.min(elapsed / LIFT_SHRINK_DURATION, 1);
+                ctx.globalAlpha = Math.max(0, 1 - progress);
+            }
+
+            ctx.beginPath();
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = 'transparent';
+
+            // 決定基礎顏色
+            let drawColor = this.currentColor;
+            
+            // 未準備好時的顏色處理
+            if (gameState !== 'RESULT' && !this.isReady) {
+                 if (mode === 'pick') drawColor = '#333';
+                 if (mode === 'group') drawColor = '#555'; 
+            }
+            
+            if (gameState === 'RESULT') {
+                drawColor = this.currentColor;
+            }
+
+            ctx.fillStyle = drawColor;
+            let drawRadius = mode === 'group' && gameState === 'RESULT' ? currentRadius * 1 : currentRadius;
+            
+            ctx.arc(this.x, this.y, drawRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // --- Progress Bars ---
+            
+            // 決定進度條的基礎色 (Stroke Base Color)
+            let strokeBaseColor = this.originalColor;
+            if (mode === 'group' && gameState !== 'RESULT') {
+                strokeBaseColor = '#FFFFFF';
+            } else if (gameState === 'RESULT') {
+                strokeBaseColor = this.currentColor;
+            }
+
+            let showSpinningRing = true;
+            if (gameState === 'RESULT') {
+                if (mode === 'pick' && !this.isWinner) {
+                    showSpinningRing = false;
+                }
+            }
+            if (this.isLifting) {
+                showSpinningRing = false;
+            }
+
+            // Layer 1: Spinning Lock-in Ring (半透明)
+            if (showSpinningRing && !isGameExiting) {
+                const spinOffset = (Date.now() / 150) % (Math.PI * 2);
+                
+                ctx.beginPath();
+                const fullCircleAdjustment = this.isReady ? 0.0001 : 0;
+                const currentProgress = this.isReady ? 1 : this.lockInProgress;
+                const endAngle = (Math.PI * 2 * currentProgress) - fullCircleAdjustment;
+                
+                ctx.arc(this.x, this.y, currentRadius + 15, spinOffset, spinOffset + endAngle);
+                
+                ctx.strokeStyle = hexToRgba(strokeBaseColor, 0.4);
+                
+                ctx.lineWidth = 8;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+
+            // Layer 2: Global Countdown Ring (原色/不透明)
+            if (gameState === 'COUNTDOWN' && !this.isLifting) {
+                ctx.beginPath();
+                const spinOffset2 = (Date.now() / 200) % (Math.PI * 2);
+                const startAngle = (-Math.PI / 2) + spinOffset2;
+                const endAngle = startAngle + (Math.PI * 2 * globalProgress);
+                ctx.arc(this.x, this.y, currentRadius + 15, startAngle, endAngle);
+                
+                ctx.strokeStyle = strokeBaseColor;
+                
+                ctx.lineWidth = 8; 
+                ctx.lineCap = 'butt';
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+    }
+
+    // --- Core Logic ---
+
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    function loop() {
+        ctx.clearRect(0, 0, width, height);
+        fingers.forEach((f, id) => {
+            f.update();
+            if (f.isDead) {
+                fingers.delete(id);
+            }
+        });
+        
+        updateGameLogic();
+
+        if (gameState === 'RESULT' && mode === 'pick') {
+            const winners = Array.from(fingers.values()).filter(f => f.isWinner && !f.isDead);
+            if (winners.length === 1) {
+                drawSpotlight(winners[0]);
+            }
+        }
+
+        fingers.forEach(f => f.draw(ctx));
+
+        requestAnimationFrame(loop);
+    }
+    loop();
+
+    function drawSpotlight(winner) {
+        const targetRadius = winner.radius + 60;
+        const maxDimension = Math.max(width, height) * 1.5;
+        let currentRadius;
+
+        if (isGameExiting) {
+            const elapsed = Date.now() - exitStartTime;
+            let progress = Math.min(elapsed / EXIT_ANIMATION_DURATION, 1);
+            const eased = easeInCubic(progress); 
+            currentRadius = targetRadius + (maxDimension - targetRadius) * eased;
+        } else {
+            const elapsed = Date.now() - resultStartTime;
+            let progress = Math.min(elapsed / 600, 1);
+            const eased = easeOutCubic(progress); 
+            currentRadius = maxDimension - (maxDimension - targetRadius) * eased;
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, height);
+        if (currentRadius < 0) currentRadius = 0;
+        
+        ctx.arc(winner.x, winner.y, currentRadius, 0, Math.PI * 2, true);
+        ctx.fillStyle = winner.originalColor;
+        ctx.globalAlpha = 0.85; 
+        
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function updateGameLogic() {
+        const activeFingers = Array.from(fingers.values()).filter(f => !f.isLifted && !f.isLifting && !f.isDead);
+        const readyCount = activeFingers.filter(f => f.isReady).length;
+
+        // 只要有 1 個或以上 (> 0) 準備好的圓圈，就隱藏 UI (TranslateY)
+        if (gameState === 'RESULT' || readyCount > 0) {
+            uiLayer.classList.add('hidden-ui');
+        } else {
+            uiLayer.classList.remove('hidden-ui');
+        }
+
+        if (gameState === 'RESULT') {
+            return;
+        }
+
+        const count = activeFingers.length;
+        const minFingersNeeded = Math.max(2, mode === 'pick' ? targetValue + 1 : targetValue);
+        const allReady = count > 0 && activeFingers.every(f => f.isReady);
+
+        if (count >= minFingersNeeded && allReady) {
+            if (gameState === 'WAITING') {
+                gameState = 'COUNTDOWN';
+                globalCountdownStart = Date.now();
+                globalProgress = 0;
+            } else if (gameState === 'COUNTDOWN') {
+                const elapsed = Date.now() - globalCountdownStart;
+                globalProgress = elapsed / TOTAL_COUNTDOWN_TIME;
+                
+                if (globalProgress >= 1) {
+                    calculateResult();
+                }
+            }
+        } else {
+            if (gameState === 'COUNTDOWN') {
+                gameState = 'WAITING';
+                globalProgress = 0;
+            }
+        }
+    }
+
+    function calculateResult() {
+        gameState = 'RESULT';
+        resultStartTime = Date.now();
+        isGameExiting = false; 
+        
+        fingers.forEach(f => f.isLifted = false);
+
+        const fingerArray = Array.from(fingers.values()).filter(f => !f.isLifted && !f.isLifting && !f.isDead);
+
+        if (mode === 'pick') {
+            const shuffled = shuffle(fingerArray);
+            const winners = shuffled.slice(0, targetValue);
+            
+            fingerArray.forEach(f => {
+                if (winners.includes(f)) {
+                    f.isWinner = true;
+                } else {
+                    f.isLoser = true;
+                }
+            });
+        } else if (mode === 'group') {
+            const shuffled = shuffle(fingerArray);
+            const groupColors = [];
+            for(let i=0; i<targetValue; i++) {
+                const hue = Math.floor((360 / targetValue) * i);
+                groupColors.push(hslToHex(hue, 100, 60)); 
+            }
+
+            shuffled.forEach((f, index) => {
+                const gIndex = index % targetValue;
+                f.targetGroupColor = groupColors[gIndex];
+            });
+        }
+        
+        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+    }
+
+    function handleTouch(e) {
+        e.preventDefault();
+        const touches = e.changedTouches;
+
+        for (let i = 0; i < touches.length; i++) {
+            const t = touches[i];
+            
+            if (e.type === 'touchstart') {
+                if (gameState === 'RESULT') return; 
+
+                fingers.set(t.identifier, new Finger(t.identifier, t.pageX, t.pageY));
+                if (gameState === 'COUNTDOWN') {
+                    gameState = 'WAITING';
+                    globalProgress = 0;
+                }
+
+            } else if (e.type === 'touchmove') {
+                const f = fingers.get(t.identifier);
+                if (f && !f.isLifted) {
+                    if (gameState === 'RESULT') {
+                        if (mode === 'pick') {
+                             if (f.isWinner) { f.x = t.pageX; f.y = t.pageY; }
+                        } else if (mode === 'group') {
+                             f.x = t.pageX; f.y = t.pageY;
+                        }
+                    } else {
+                        f.x = t.pageX; f.y = t.pageY;
+                    }
+                }
+
+            } else if (e.type === 'touchend' || e.type === 'touchcancel') {
+                const f = fingers.get(t.identifier);
+                if (f) {
+                    f.startLift();
+                }
+
+                if (gameState === 'RESULT') {
+                    checkResultEndCondition();
+                } else {
+                    if (gameState === 'COUNTDOWN') {
+                        gameState = 'WAITING';
+                        globalProgress = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    function checkResultEndCondition() {
+        const activeFingers = Array.from(fingers.values());
+        
+        let shouldReset = false;
+
+        if (mode === 'pick') {
+            const activeWinners = activeFingers.filter(f => f.isWinner && !f.isLifted);
+            if (activeWinners.length === 0) {
+                shouldReset = true;
+            }
+        } else if (mode === 'group') {
+             const fingersOnScreen = activeFingers.filter(f => !f.isLifted);
+             if (fingersOnScreen.length === 0) {
+                 shouldReset = true;
+             }
+        }
+
+        if (shouldReset) {
+            if (!resetTimer) {
+                resetTimer = setTimeout(() => {
+                    startExitSequence();
+                }, 1000); 
+            }
+        }
+    }
+
+    function startExitSequence() {
+        isGameExiting = true;
+        exitStartTime = Date.now();
+        setTimeout(resetGame, EXIT_ANIMATION_DURATION);
+    }
+
+    function resetGame() {
+        gameState = 'WAITING';
+        fingers.clear(); 
+        globalProgress = 0;
+        resetTimer = null;
+        isGameExiting = false;
+        uiLayer.classList.remove('hidden-ui');
+    }
+
+    canvas.addEventListener('touchstart', handleTouch, { passive: false });
+    canvas.addEventListener('touchmove', handleTouch, { passive: false });
+    canvas.addEventListener('touchend', handleTouch, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouch, { passive: false });
+
+    // Mouse Events
+    let isMouseDown = false;
+    canvas.addEventListener('mousedown', (e) => {
+        if (gameState === 'RESULT') return;
+        isMouseDown = true;
+        fingers.set(999, new Finger(999, e.pageX, e.pageY));
+    });
+    canvas.addEventListener('mousemove', (e) => {
+        const f = fingers.get(999);
+        if (!f) return;
+        
+        if (gameState === 'RESULT') {
+             if (mode === 'pick' && f.isWinner) { f.x = e.pageX; f.y = e.pageY; }
+             if (mode === 'group') { f.x = e.pageX; f.y = e.pageY; }
+        } else {
+            if (isMouseDown) { f.x = e.pageX; f.y = e.pageY; }
+        }
+    });
+    canvas.addEventListener('mouseup', () => {
+        isMouseDown = false;
+        const f = fingers.get(999);
+        if (f) {
+            f.startLift();
+        }
+
+        if (gameState === 'RESULT') {
+            checkResultEndCondition();
+        } else {
+            if (gameState === 'COUNTDOWN') {
+                gameState = 'WAITING';
+                globalProgress = 0;
+            }
+        }
+    });
+
+    function setMode(newMode) {
+        if (mode === newMode) return;
+        mode = newMode;
+        
+        document.getElementById('mode-pick').classList.toggle('active', mode === 'pick');
+        document.getElementById('mode-group').classList.toggle('active', mode === 'group');
+        
+        targetValue = mode === 'pick' ? 1 : 2;
+        updateLabel();
+    }
+
+    function adjustCount(delta) {
+        targetValue += delta;
+        if (mode === 'pick') {
+            if (targetValue < 1) targetValue = 1;
+            if (targetValue > 5) targetValue = 5; 
+        } else {
+            if (targetValue < 2) targetValue = 2;
+            if (targetValue > 5) targetValue = 5;
+        }
+        updateLabel();
+    }
+
+    function updateLabel() {
+        document.getElementById('target-count').innerText = targetValue;
+        document.getElementById('target-label').innerText = mode === 'pick' ? '人' : '組';
+    }
+
+    // --- Screen Wake Lock (防止螢幕休眠) ---
+    let wakeLock = null;
+    async function requestWakeLock() {
+        if ('wakeLock' in navigator) {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => {
+                    wakeLock = null;
+                });
+            } catch (err) {
+                // 忽略非致命錯誤（如省電模式或暫不支援）
+            }
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            requestWakeLock();
+        }
+    });
+
+    window.addEventListener('touchstart', requestWakeLock, { once: true, passive: true });
+    window.addEventListener('click', requestWakeLock, { once: true, passive: true });
+
+    // --- 防止 iOS Safari 多指手勢與選單衝突 ---
+    document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener('gestureend', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // 防止 iOS Safari 頁面彈性橡皮筋滾動
+    document.addEventListener('touchmove', (e) => {
+        if (e.target === canvas) {
+            e.preventDefault();
+        }
+    }, { passive: false });
+
+</script>
+</body>
+</html>
