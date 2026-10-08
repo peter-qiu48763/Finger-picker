@@ -232,7 +232,8 @@
     const EXIT_ANIMATION_DURATION = 500; 
     const LOSER_SHRINK_DURATION = 400;
     const LIFT_SHRINK_DURATION = 220; // 手指鬆開縮小消失的動畫時長 (ms)
-    const SPOTLIGHT_EXIT_DURATION = 420; // 聚光燈放大退出動畫時長 (ms)
+    const SPOTLIGHT_EXIT_DURATION = 500; // 聚光燈放大退出動畫時長 (ms)
+    const RESULT_RESET_DELAY = 1500; // 鬆手後停留 1.5 秒再退出 (ms)
 
     // Spotlight State (僅限單人中獎模式)
     let spotlightState = {
@@ -728,7 +729,12 @@
             } else if (e.type === 'touchend' || e.type === 'touchcancel') {
                 const f = fingers.get(t.identifier);
                 if (f) {
-                    f.startLift();
+                    if (gameState === 'RESULT') {
+                        // 結果狀態下僅標記鬆手，不立即縮小消失，等待全員鬆手停留 1.5 秒
+                        f.isLifted = true;
+                    } else {
+                        f.startLift();
+                    }
                 }
 
                 if (gameState === 'RESULT') {
@@ -762,19 +768,15 @@
 
         if (shouldReset) {
             if (!resetTimer) {
-                // 單人中獎且聚光燈有效時：立即啟動聚光燈放大退出動畫
-                if (mode === 'pick' && targetValue === 1 && spotlightState.active) {
-                    spotlightState.isExiting = true;
-                    spotlightState.exitStartTime = Date.now();
-                    resetTimer = setTimeout(() => {
-                        resetGame();
-                    }, SPOTLIGHT_EXIT_DURATION);
-                } else {
-                    // 多人中獎或分組模式：無聚光燈，正常延遲退出
-                    resetTimer = setTimeout(() => {
-                        startExitSequence();
-                    }, 800); 
-                }
+                // 抽籤中獎者/分組模式：手都鬆開後停留 1.5 秒再執行退出與消失動畫
+                resetTimer = setTimeout(() => {
+                    // 若是單人中獎聚光燈，同步啟動聚光燈放大退出動畫
+                    if (mode === 'pick' && targetValue === 1 && spotlightState.active) {
+                        spotlightState.isExiting = true;
+                        spotlightState.exitStartTime = Date.now();
+                    }
+                    startExitSequence();
+                }, RESULT_RESET_DELAY);
             }
         }
     }
@@ -830,7 +832,11 @@
         isMouseDown = false;
         const f = fingers.get(999);
         if (f) {
-            f.startLift();
+            if (gameState === 'RESULT') {
+                f.isLifted = true;
+            } else {
+                f.startLift();
+            }
         }
 
         if (gameState === 'RESULT') {
