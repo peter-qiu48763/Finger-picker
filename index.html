@@ -317,10 +317,11 @@
 
         // --- Finger Entity ---
         class Finger {
-            constructor(id, x, y) {
+            constructor(id, x, y, isSimulated = false) {
                 this.id = id;
                 this.x = x;
                 this.y = y;
+                this.isSimulated = isSimulated;
                 this.originalColor = this.assignUniqueColor();
                 this.currentColor = this.originalColor;
 
@@ -721,11 +722,11 @@
 
             triggerVibrate([100, 50, 100]);
 
-            // 電腦端若未按住滑鼠（全 Shift 釘選情境），結算判定完畢後標記為鬆手並啟動 1.5 秒退場
+            // 電腦端測試：若存在模擬手指且當前未按住滑鼠（全 Shift 釘選情境），結算判定完畢後標記模擬手指為已鬆手並啟動退場
             if (!isMouseDown) {
                 let hasSimulated = false;
                 for (const f of fingers.values()) {
-                    if (f.id >= 999) {
+                    if (f.isSimulated) {
                         f.isLifted = true;
                         hasSimulated = true;
                     }
@@ -747,7 +748,7 @@
                     // 結算狀態、等待退出中或退場動畫期間，不偵測新的觸碰
                     if (gameState === 'RESULT' || isGameExiting) return;
 
-                    fingers.set(t.identifier, new Finger(t.identifier, t.pageX, t.pageY));
+                    fingers.set(t.identifier, new Finger(t.identifier, t.pageX, t.pageY, false));
                     if (gameState === 'COUNTDOWN') {
                         gameState = 'WAITING';
                         globalProgress = 0;
@@ -856,6 +857,7 @@
             spotlightState.isExiting = false;
             uiLayer.classList.remove('hidden-ui');
             lastUiHidden = false;
+            simFingerCounter = 0;
         }
 
         // 事件監聽 (Passive: false 嚴密防禦系統手勢)
@@ -867,21 +869,24 @@
 
         // 桌面滑鼠測試支援 (支援 Shift+點擊釘選多個模擬手指)
         let isMouseDown = false;
+        const MOUSE_SIM_ID = 'sim_mouse_main';
+        let simFingerCounter = 0;
+
         canvas.addEventListener('mousedown', (e) => {
             // 結算狀態、等待退出中或退場動畫期間，不偵測新的觸碰
             if (gameState === 'RESULT' || isGameExiting) return;
 
             if (e.shiftKey) {
-                const simId = 1000 + fingers.size;
-                fingers.set(simId, new Finger(simId, e.pageX, e.pageY));
+                const simId = `sim_mouse_${++simFingerCounter}`;
+                fingers.set(simId, new Finger(simId, e.pageX, e.pageY, true));
                 return;
             }
             isMouseDown = true;
-            fingers.set(999, new Finger(999, e.pageX, e.pageY));
+            fingers.set(MOUSE_SIM_ID, new Finger(MOUSE_SIM_ID, e.pageX, e.pageY, true));
         });
 
         window.addEventListener('mousemove', (e) => {
-            const f = fingers.get(999);
+            const f = fingers.get(MOUSE_SIM_ID);
             if (!f) return;
 
             if (gameState === 'RESULT') {
@@ -907,15 +912,15 @@
             isMouseDown = false;
 
             if (gameState === 'RESULT') {
-                // 電腦瀏覽器測試：放開滑鼠時將所有虛擬手指 (id >= 999，包含 Shift 釘選手指) 同步標記為已鬆手
+                // 電腦瀏覽器測試：放開滑鼠時將所有模擬手指 (包含 Shift 釘選手指) 同步標記為已鬆手
                 for (const f of fingers.values()) {
-                    if (f.id >= 999) {
+                    if (f.isSimulated) {
                         f.isLifted = true;
                     }
                 }
                 checkResultEndCondition();
             } else if (wasMouseDown) {
-                const f = fingers.get(999);
+                const f = fingers.get(MOUSE_SIM_ID);
                 if (f) {
                     f.startLift();
                 }
