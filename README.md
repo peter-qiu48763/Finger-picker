@@ -80,7 +80,7 @@
 ├── .nojekyll               # 停用 GitHub Pages 預設的 Jekyll 靜態建置
 ├── icon-192.png            # PWA 桌面圖示 (192x192)
 ├── icon-512.png            # PWA 高清啟動圖示 (512x512)
-├── index.html              # 應用主程式（HTML + CSS + Canvas 核心邏輯）
+├── index.html              # 應用主程式
 ├── manifest.json           # PWA 應用設定檔
 ├── sw.js                   # Service Worker 離線快取控制腳本
 └── README.md               # 專案說明與部署指南

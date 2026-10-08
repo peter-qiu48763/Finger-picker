@@ -1,4 +1,4 @@
-const CACHE_NAME = "finger-picker-v2";
+const CACHE_NAME = "finger-picker-v3";
 const urlsToCache = [
   "./",
   "./index.html",

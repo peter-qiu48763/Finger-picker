@@ -1,6 +1,6 @@
 {
   "name": "指尖抽籤分組",
-  "short_name": "手指抽籤",
+  "short_name": "指尖抽籤",
   "description": "多人聚會派對必備的指尖隨機抽籤與分組工具",
   "start_url": "./index.html",
   "scope": "./",
