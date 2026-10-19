@@ -229,6 +229,7 @@
         // Result Animation & Timers
         let resultStartTime = 0;
         let resetTimer = null;
+        let exitTimer = null;
 
         // Exit Animation State
         let isGameExiting = false;
@@ -237,7 +238,7 @@
         const LOSER_SHRINK_DURATION = 400;
         const LIFT_SHRINK_DURATION = 220; // 手指鬆開縮小消失的動畫時長 (ms)
         const SPOTLIGHT_EXIT_DURATION = 450; // 聚光燈放大退出動畫時長 (ms)
-        const RESULT_RESET_DELAY = 1200; // 鬆手後停留 1.5 秒再退出 (ms)
+        const RESULT_RESET_DELAY = 1200; // 鬆手後停留 1.2 秒再退出 (ms)
 
         // Spotlight State (僅限單人中籤模式)
         let spotlightState = {
@@ -334,8 +335,6 @@
 
                 this.isWinner = false;
                 this.targetGroupColor = null;
-                this.groupIndex = -1;
-                this.isLoser = false;
 
                 this.isLifted = false;
                 this.isLifting = false;
@@ -365,7 +364,7 @@
                 }
             }
 
-            update() {
+            update(dt = 16.667) {
                 if (this.isLifting) {
                     const elapsed = Date.now() - this.liftStartTime;
                     const progress = Math.min(elapsed / LIFT_SHRINK_DURATION, 1);
@@ -378,7 +377,12 @@
                 }
 
                 if (this.radius < this.targetRadius) {
-                    this.radius += (this.targetRadius - this.radius) * 0.2;
+                    // 幀率無關的緩動 (以 60Hz 每幀 0.2 差距收斂為基準)
+                    const factor = 1 - Math.pow(0.8, dt / 16.667);
+                    this.radius += (this.targetRadius - this.radius) * factor;
+                    if (this.targetRadius - this.radius < 0.05) {
+                        this.radius = this.targetRadius;
+                    }
                 }
 
                 if (gameState === 'WAITING' || gameState === 'COUNTDOWN') {
@@ -536,12 +540,16 @@
 
         // 智能 UI 避讓狀態旗標 (DOM 節流)
         let lastUiHidden = false;
+        let lastFrameTime = performance.now();
 
-        function loop() {
+        function loop(currentTime = performance.now()) {
+            const dt = Math.min(Math.max(currentTime - lastFrameTime, 1), 100);
+            lastFrameTime = currentTime;
+
             ctx.clearRect(0, 0, width, height);
 
             for (const [id, f] of fingers) {
-                f.update();
+                f.update(dt);
                 if (f.isDead) {
                     fingers.delete(id);
                 }
@@ -560,7 +568,7 @@
 
             requestAnimationFrame(loop);
         }
-        loop();
+        requestAnimationFrame(loop);
 
         // 聚光燈樣式還原 (Canvas 逆向路徑挖洞，直接填入中籤者原色，開場收縮，退場擴散)
         function drawSpotlight() {
@@ -667,9 +675,9 @@
             resultStartTime = Date.now();
             isGameExiting = false;
 
-            // 1. 所有在場手指全部參與結算判定
+            // 1. 所有在場且未在抬起中的手指參與結算判定
             for (const f of fingers.values()) {
-                f.isLifted = false;
+                if (!f.isLifting) f.isLifted = false;
             }
 
             const fingerArray = [];
@@ -685,11 +693,7 @@
                 const winners = new Set(shuffled.slice(0, targetValue));
 
                 for (const f of fingerArray) {
-                    if (winners.has(f)) {
-                        f.isWinner = true;
-                    } else {
-                        f.isLoser = true;
-                    }
+                    f.isWinner = winners.has(f);
                 }
 
                 // 僅在單人中籤 (targetValue === 1) 時啟動特色聚光燈
@@ -746,7 +750,7 @@
 
                 if (e.type === 'touchstart') {
                     // 結算狀態、等待退出中或退場動畫期間，不偵測新的觸碰
-                    if (gameState === 'RESULT' || isGameExiting) return;
+                    if (gameState === 'RESULT' || isGameExiting) continue;
 
                     fingers.set(t.identifier, new Finger(t.identifier, t.pageX, t.pageY, false));
                     if (gameState === 'COUNTDOWN') {
@@ -841,7 +845,10 @@
         function startExitSequence() {
             isGameExiting = true;
             exitStartTime = Date.now();
-            setTimeout(resetGame, EXIT_ANIMATION_DURATION);
+            if (exitTimer) {
+                clearTimeout(exitTimer);
+            }
+            exitTimer = setTimeout(resetGame, EXIT_ANIMATION_DURATION);
         }
 
         function resetGame() {
@@ -851,6 +858,10 @@
             if (resetTimer) {
                 clearTimeout(resetTimer);
                 resetTimer = null;
+            }
+            if (exitTimer) {
+                clearTimeout(exitTimer);
+                exitTimer = null;
             }
             isGameExiting = false;
             spotlightState.active = false;
@@ -879,10 +890,18 @@
             if (e.shiftKey) {
                 const simId = `sim_mouse_${++simFingerCounter}`;
                 fingers.set(simId, new Finger(simId, e.pageX, e.pageY, true));
+                if (gameState === 'COUNTDOWN') {
+                    gameState = 'WAITING';
+                    globalProgress = 0;
+                }
                 return;
             }
             isMouseDown = true;
             fingers.set(MOUSE_SIM_ID, new Finger(MOUSE_SIM_ID, e.pageX, e.pageY, true));
+            if (gameState === 'COUNTDOWN') {
+                gameState = 'WAITING';
+                globalProgress = 0;
+            }
         });
 
         window.addEventListener('mousemove', (e) => {
@@ -1003,10 +1022,7 @@
 
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                if (gameState === 'COUNTDOWN') {
-                    gameState = 'WAITING';
-                    globalProgress = 0;
-                }
+                resetGame();
             } else {
                 requestWakeLock();
             }
